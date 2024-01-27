@@ -1,0 +1,203 @@
+---
+title: "Analysis"
+author: "Fábio Lamaison Pinto"
+date: "2024-01-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(png)
+library(sf)
+
+cyclistic_trips_2016 <- readRDS("~/Data/Trips/clean/cyclistic_trips_2016.rda")
+stations_coord <- readRDS("~/Data/Stations/clean/stations_coord.rda")
+chicago_map <- st_read("~/Data/Maps/chicago_city_boundaries.kml")
+
+```
+
+## ANALYZE AND SHARE
+
+###### [FOR THE GOOGLE PROFESSIONAL DATA ANALYTICS CERTIFICATE CAPSTONE PROJECT - TRACK 1]{.smallcaps}
+
+This document comprises the analysis process step, for the track 1 of the Google's professional data analytics certificate, where the main object is to find insights on how to help a fictional company called Cyclistic achieve their business goal of converting existing customers in to subscribers of their bike sharing program.
+
+The data cleaning process was already completed, and comprises another R markdown file, both hosted on [my Kaggle](https://www.kaggle.com/fbiolamaisonpinto), the data being used for this project was sourced from <https://divvy-tripdata.s3.amazonaws.com/index.html>, and <https://grg.org/>.
+
+### THE BIG PICTURE
+
+The main goal for this analytic process will be to identify trends on how customers and subscribers use the bike sharing service, and then propose ways on how to design a marketing campaign to promote customers to become subscribers.
+
+### USERS
+
+I'll start this process by viewing the share of entries for each user type, to have a grasp on the overall composition of the service users.
+
+```{r}
+ggplot(cyclistic_trips_2016) +
+  geom_bar(mapping = aes(x = "", fill = user_type), width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  labs(title = "User Type Composition", fill = "User Type")
+```
+
+Analyzing the pie chart, it shows that more than 75% of entries are from subscribers of the service, while around 25% of the entries are from customers, at first sight it is important to notice that these entries do not correspond each to a single user, but to a single ride, what gives the possibility to in fact have a bigger amount of customers that use the service fewer times, and a lesser amount of subscribers that use the service more times, resulting in more entries, but something that doesn't leave much space for thought, is that there are very few dependents user type, due to that and to ease presentation, these entries will be hidden from the analysis.
+
+```{r}
+cyclistic_trips_2016 <- cyclistic_trips_2016 %>%
+  filter(user_type !="Dependent")
+```
+
+Having an initial notion of user type composition, and filtering out dependents, lets analyse the age and gender of our subscribers, to have an initial grasp on who they are, remember that gender and age weren't provided for customers.
+
+```{r}
+ggplot(cyclistic_trips_2016, aes(x = age, color = gender, fill = gender)) +
+  geom_freqpoly(binwidth = 2, position = "identity") +
+  labs(title = "Age Frequency by Gender", x = "Age", y = "Frequency") +
+  scale_color_manual(values = c("Male" = "purple", "Female" = "coral")) +
+  scale_x_continuous(breaks = seq(10, 110, by = 10))
+```
+
+As it shows most entries are from subscribers are around the age of 26, the entries of male subscribers are usually more than the double of the amount of female subscribers entries, the age range for males that have more than 50000 entries span from right after 20 years to around 50 years, for females this span also starts around 20 years, but go only as far as close to 34 years of age.
+
+### TRIPS
+
+Now lets analyse the frequency of trips per month grouped by user type, this will help on understanding how weather may affect user activity, preferred periods of usage, and hint on what data we should further focus.
+
+```{r cars}
+month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+ggplot(cyclistic_trips_2016) +
+  geom_bar(mapping = aes(x = month(start_date), fill = user_type)) +
+  scale_x_continuous(breaks = 1:12, labels = month_labels)
+```
+
+The above bar chart shows January and December being the months of least activity, with a smashing proportion in favor of subscribers, having almost no activity from customers, while June, July and August show the most activity for all types of users, having a bigger participation from customers in comparison to what is seen in the months of least activity.
+
+Customer activity presents a clear pattern of growth from winter to summer, and shrinking from summer to winter where there is almost no activity, a seasonal pattern that benefits hotter days, this information paired with the information that 30% of users use the service to commute to work (given by the company) points out to their primary interest in the service being of leisure, and that the ones using the service to commute to work are mainly subscribers, if not all.
+
+Subscriber activity although increases in the summer, it stills significantly present during cold periods, what indicated that some subscribers use the service all year around, possibly to daily use transportation, a curious characteristic shown in the graph is that subscriber usage actually falls a bit during July, to after regain momentum before starting to lose it again towards winter, this may be due to younger subscribers entering their vacation time, what leads to them not using the service for daily transportation in this period.
+
+For the sake of brevity I'll not go as far as putting these theories through detailed evaluation tests, having discovered the most and least active months for the service, and the proportion between user types throughout the year, I'll go further on distinguishing user type behavior based on trip max and mean length.
+
+```{r}
+cyclistic_trip_metrics <- data.frame(
+  row.names = c("Mean", "Max"),
+  Customer = c(0.00,0.00),
+  Subscriber = c(0.00,0.00)
+)
+
+
+cyclistic_trip_metrics["Mean", "Customer"] <- cyclistic_trips_2016 %>%
+  filter(user_type == "Customer") %>%
+  summarise(mean(trip_duration, na.rm = TRUE)/60)
+
+cyclistic_trip_metrics["Max", "Customer"] <- cyclistic_trips_2016 %>%
+  filter(user_type == "Customer") %>%
+  summarise(max(trip_duration, na.rm = TRUE)/60)
+
+cyclistic_trip_metrics["Mean", "Subscriber"] <- cyclistic_trips_2016 %>%
+  filter(user_type == "Subscriber") %>%
+  summarise(mean(trip_duration, na.rm = TRUE)/60)
+
+cyclistic_trip_metrics["Max", "Subscriber"] <- cyclistic_trips_2016 %>%
+  filter(user_type == "Subscriber") %>%
+  summarise(max(trip_duration, na.rm = TRUE)/60)
+
+cyclistic_trip_metrics["Max", "Relation"] <- cyclistic_trip_metrics %>%
+  summarise(cyclistic_trip_metrics["Max", "Customer"]/cyclistic_trip_metrics["Max", "Subscriber"])
+
+cyclistic_trip_metrics["Mean", "Relation"] <- cyclistic_trip_metrics %>%
+  summarise(cyclistic_trip_metrics["Mean", "Customer"]/cyclistic_trip_metrics["Mean", "Subscriber"])
+
+cyclistic_trip_metrics <- cyclistic_trip_metrics %>%
+  mutate_all(round, digits = 2)
+
+print(cyclistic_trip_metrics)
+
+
+```
+
+On the table above is presented the mean and max trip duration in minutes, according to user type, and the relation of these metrics between each user type, the mean duration of a Customer trip is 2.57 times longer than the one of a Subscriber, while the max duration is pretty much the same.
+
+The recurrence of data that leads to the thesis that customers use the service for leisure while subscribers use it for daily transportation keeps coming up, lets go a step further in this direction and see if subscribers are more active during week days than customers.
+
+```{r}
+weekday_labels <- c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+ggplot(cyclistic_trips_2016) +
+  geom_bar(mapping = aes(x = wday(start_date), fill = user_type)) +
+  scale_x_continuous(breaks = 1:7, labels = weekday_labels)
+```
+
+It is perfectly clear that customers prefer to use the service on and around weekends, while subscribers prefer the weekdays, even though they also use the service on weekends, and still have more entries on these dates than customers.
+
+### STATIONS
+
+Now lets check if there are differences on the preference for stations between user types, by ranking stations based on their occurrence in the data frame, and grouping them by user type.
+
+```{r}
+station_entries <- data.frame(
+  station = c(cyclistic_trips_2016$from_station_name, cyclistic_trips_2016$to_station_name),
+  user_type = c(cyclistic_trips_2016$user_type, cyclistic_trips_2016$user_type)
+                       )
+grouped_stations <- station_entries %>%
+  group_by(user_type = user_type, name = station) %>%
+  summarize(count = n())
+
+popular_stations <- grouped_stations %>%
+  arrange(desc(count))
+
+print(popular_stations)
+  
+```
+
+Even though customer entries are less than a third of subscribers, the most entries for a same station grouped by user type belong to them, with 150578 entries for the Streeter Dr & Grand Ave, they hold half of the spots for the top 10 entries list, indicating that customers activity is more concentrated on certain stations, and subscribers more disperse.
+
+A quick search online shows that the top 5 stations for customers are all located close to the lake, on leisure and tourist oriented areas, while subscribers preferred stations are located deeper in the city, in more service oriented areas. Lets end this analysis by plotting station occurrence over the map of Chicago, so users station preference can be better accessed, for this I will use a data frame containing id, name and geographical coordinates, that was previously cleaned, and a KML file of the Chicago city boundaries.
+
+```{r}
+stations <- merge(popular_stations, stations_coord, by = "name", all.x = TRUE)
+
+points_df <- stations %>% 
+  filter(!is.na(latitude) & !is.na(longitude))
+
+points_sf <- st_as_sf(points_df, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot() +
+  geom_sf(data = chicago_map) +
+  geom_sf(data = head(points_sf,90), aes(color = user_type, size = count, alpha = count))+
+  scale_color_manual(values = c("Customer" = "blue", "Subscriber" = "green")) +
+  scale_size_continuous(range = c(1, 5)) +
+  scale_alpha_continuous(range = c(0.2, 1)) +
+  theme_minimal() +
+  facet_wrap(~user_type)
+```
+
+The above image displays the top 90 most popular stations plotted on top of Chicago's map, the circles representing each station vary in size based on the amount of trips that took their start or end on said station, it makes clearer the preference of subscribers for stations located in the heart of the city, while trips from customers are specially present at lake side, on Streeter Dr & Grand Ave station to be more precise, located on a touristic and leisure destination, they also take place on the heart of the city, in matching destinations with subscribers trips stations.
+
+## ACT
+
+**Focus on promoting the bike share as a good way to commute to work, and doing quick but frequent trips,** these are behaviors that where securely identified as diverging between casual costumers and subscribers, and that are capable of leading interested users to subscribe the service.
+
+**Promote the use of the service during all the year,** even during winter, the data showed that almost no casual customer uses the service during winter, although subscribers continue to use it, identifying compelling ways to bring customers to use the service during winter, can end up leading them to have a subscription.
+
+**Prioritize promoting subscription advertisement to customers on the preferred mean of communication for the people on their mid 20's,** as this age group has the biggest share of entries for both gender, it may also be important to take into account that our users with the most activity are males spanning from 20 to 60 years of age, and females from 20 to 35 years of age, maybe a good broader choice would be to consider the target audience as being males and females spanning from 20 to 35.
+
+If advertising on outdoors, focus on promoting subscription advertisement on the heart of the city, close to stations that are preferred by subscribers, but that are also used by customers, promote the use of the service for daily tasks, and transportation, as the data shown points to these being more recurrent motifs for the service use by subscribers.
+
+### DISCLAIMER.
+
+It is important to remind as a disclaimer that this data do not provide user ID, and due to that the analysis maybe over valuing certain age groups and genders, due to them being fewer, or as big as other groups, but having more entries on the data base, in other words, using more often the service.
+
+what even though cheering due to their likeness of the service, isn't the most profitable, since they pay the same for the service, and use it more times, resulting in the need of more maintenance, diminishing the profit brought by their subscription.
+
+So it wasn't possible to precisely identify which target audience would be the best to target for increasing profit, due to the user IDs or alternatively a quantitative research, having the given suggestion based solely on amount of entries.
+
+### NEXT STEPS
+
+The analysis could be further developed by pairing the already included data sets, with qualitative and quantitative research on the service's users and their preferences, as also with research on who are the people that are prone to enjoy using bikes to everyday tasks such as commute to work.
+
+The already explored data-sets could also serve to identify what locations need more stations, what stations are under used, what is common between popular stations, what is the mean speed of each type of user, their preferred hour range to use the service, and more.

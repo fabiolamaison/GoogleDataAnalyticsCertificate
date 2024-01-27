@@ -1,0 +1,651 @@
+---
+title: "Data Cleaning Cyclistic 2016 Trips"
+author: "Fábio Lamaison Pinto"
+date: "2024-01-01"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load Library
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(here)
+library(lubridate)
+
+# Functions
+
+is_only_customer <- function(null_values) {
+  if(null_values[1,1] == "Customer") {
+    print("True")
+  } else {
+    print("False")
+  }
+}
+```
+
+## DATA CLEANING AND VALIDATION
+
+###### [FOR THE GOOGLE PROFESSIONAL DATA ANALYTICS CERTIFICATE CAPSTONE PROJECT - TRACK 1]{.smallcaps}
+
+This is a capstone project for the Google Data Analytics Professional
+Certificate it'll be based on a fictional bike sharing company called
+Cyclistic, which uses Divvy's data sets on the use of their services as
+'proxy' data <https://divvy-tripdata.s3.amazonaws.com/index.html>.
+
+The tool chosen to do the analysis is the R markdown, as you can see,
+this tool was chosen due to it's capabilities in clearly showing the
+whole process, and allowing peers to verify step by step the process
+taken to reach the end result, SQL and Google Sheets where also explored
+as a option, and part of the analytics process where developed on them,
+but further discarded as R presented to be a sturdier choice, providing
+an all in one solution.
+
+The data provided for the year 2016, comprehends .csv files of tables on
+trips and stations, for this project we'll focus only on trips data
+frames, they are divided on quarters, being the second quarter divided
+on it's months, so first of all, we are going to load all of them and
+join them on a single data frame.
+
+```{r}
+trips_Q1 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q1.csv")
+
+trips_2016_04 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q1Q2/Divvy_Trips_2016_04.csv")
+trips_2016_05 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q1Q2/Divvy_Trips_2016_05.csv")
+trips_2016_06 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q1Q2/Divvy_Trips_2016_06.csv")
+
+trips_Q2 <- rbind(trips_2016_04, trips_2016_05, trips_2016_06)
+
+trips_Q3 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q3.csv")
+
+trips_Q4 <- read_csv("~/Data/Trips/source/Divvy_Trips_2016_Q4.csv")
+
+trips_2016 <- rbind(trips_Q1, trips_Q2, trips_Q3, trips_Q4)
+```
+
+Now that all of them are joined, it's time to verify if the data is
+cleaned and ready to analyze, for the first step on cleaning, metadata
+and a summarized description of the data-set will be presented, and
+serve as a base to guide the cleaning process, metadata on Divvy
+data-set on trips is as follows:
+
+> Variables:
+
+> trip_id: ID attached to each trip taken starttime: day and time trip
+> started, in CST stoptime: day and time trip ended, in CST bikeid: ID
+> attached to each bike tripduration: time of trip in seconds
+> from_station_name: name of station where trip originated
+> to_station_name: name of station where trip terminated
+> from_station_id: ID of station where trip originated to_station_id: ID
+> of station where trip terminated usertype: "Customer" is a rider who
+> purchased a 24-Hour Pass; "Subscriber" is a rider who purchased an
+> Annual Membership gender: gender of rider birthyear: birth year of
+> rider
+
+> Notes:
+>
+> -   First row contains column names
+>
+> -   Trips that did not include a start or end date were removed from
+>     original table.
+>
+> -   Gender and birthday are only available for Subscribers
+
+Trips Table Data-set Summary.
+
+```{r}
+summary(trips_2016)
+```
+
+The summary shows that the table data-set for trips has 13 columns, with
+entries relative to trips on IDs, date time, stations, and user info.
+
+### On a first glance, is possible to verify:
+
+-   All the 12 columns described on meta data are present in the data
+    frame.
+-   Column names are semantically appropriated, but don't follow the
+    same name convention.
+-   Time related columns are stored as character type, optimally they
+    should be DateTime types.
+-   A bike ID column is present, but there is no bike data-set to be
+    consulted.
+-   There is no user ID, nor an user data set, what limits the capacity
+    to spot incorrect entries for user related fields.
+
+### Ensuring Parameters Depicted on Metadata:
+
+Starting from this, it's important to further analyse the data set,
+ensuring to spot potentially hidden inconsistencies, that may lead to
+wrong outcomes, having this in mind, I'll dive deeper and check for null
+values, but first, lets ensure that all column names follow the snake
+case convention.
+
+```{r}
+colnames(trips_2016) <- c("trip_id","start_time","stop_time","bike_id","trip_duration","from_station_id" ,"from_station_name","to_station_id","to_station_name","user_type","gender","birth_year")
+colnames(trips_2016)
+```
+
+Snake case ensured to all the column names, time to check for null
+values.
+
+```{r}
+print(colSums(is.na(trips_2016)))
+```
+
+As was informed in meta data, null values can be present for gender and
+birthday, only if they belong to customer user type entries, so let's
+make sure nulls are only present on customer's entries.
+
+```{r}
+null_gender <- trips_2016 %>%
+  filter(is.na(gender)) %>%
+  group_by(user_type) %>%
+  summarize(count = n())
+
+print("Are null values for gender only present for the Customer User Type?")
+is_only_customer(null_gender)
+
+null_birth_year <- trips_2016 %>%
+  filter(is.na(birth_year)) %>%
+  group_by(user_type) %>%
+  summarize(count = n())
+
+print("Are null values for birtheyear only present for the Customer User Type?")
+is_only_customer(null_birth_year)
+```
+
+Checking if there are non null values for Customers birth year and
+gender.
+
+```{r}
+# Check for the whole year
+trips_2016 %>%
+  filter(user_type == "Customer") %>%
+  select(user_type, birth_year, gender) %>%
+  na.omit() %>%
+  head()
+```
+
+Some customers have non null values, even thought metadata on the
+data-set says that they shouldn't, there are multiple hypothesis on why,
+but since there isn't a way to validate them with the ones responsible
+for the data, this entries will be discarded.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  filter(!(user_type == "Customer" & (!is.na(gender) | !is.na(birth_year))))
+
+summary(trips_2016)
+```
+
+### Birth Year Entries:
+
+Reviewing the summary, There is some curious values for birth year, that
+endure even after dropping what should be the wrong entries for birth
+year on the data set, these curious values are such as an informed birth
+year of 1899 (117 years) to deal with this I'll start by checking the
+whole range of values for birth year.
+
+```{r}
+birth_year_range <- range(na.omit(trips_2016$birth_year))
+print(birth_year_range)
+```
+
+The range goes from 1899 to 2000, taking in consideration that the
+data-set I'm working with has data relative to 2016, this means that at
+that time users would be of ages spanning from.
+
+```{r}
+age_range <- 2016 - birth_year_range 
+print(age_range)
+```
+
+When it comes to the youngest age, 16 seems fine, as there was no limit
+of age described for being a subscribers or customer from the service,
+but when it comes to the oldest, 117 years of age seems too far, even
+for a user that opts for assistive options, so lets check out how often
+this users appear, and explore ways to check if this is a valid entry,
+or an error.
+
+```{r}
+cyclistic_supercentenarians <- trips_2016 %>%
+  filter(birth_year < (1907)) %>%
+  transform(age = 2016 - birth_year) %>%
+  select(-birth_year)
+
+print("Ages and their entries")
+print(table(cyclistic_supercentenarians$age))
+print(paste("Total entries",length(cyclistic_supercentenarians$birth_year)))
+```
+
+#### Supercentenarians:
+
+There are 442 entries of ages equal or above 110 years, that can be
+grouped on 4 different values, being them 110, 115, 116, and 117, with a
+116 being the most common entry, with 203 occurrences, it is important
+to notice that entries do not directly correspond to amount of users,
+since multiple entries can correspond to a single user, but different
+ages mean that at least one user of each must exist, once again the
+question surges, are these inputs reliable? could people of such age
+have the physical capacity to use the bike sharing service, even when it
+comes to assistive options?
+
+One step to check this would be to query the ID of assertive bike
+models, and compare them to the bike IDs present on the entries,
+unfortunately access to bike ids data-set isn't provided by this project
+fictional company Cyclistic, but since the company declares that 8% of
+it's users use assistive options, and supercentenarian users (people of
+110 years or more) account for less than 1% on the trip entries, they
+could be part of this users percentage, and these entries should be
+leaved it as it is, right?
+
+#### Gerontology Research Group:
+
+Turns out that there is a research team dedicated to keep track of
+supercentenarians around the world, they are the Gerontology Research
+Group <https://grg.org/>, and they have a data-set on supercentenarians
+<https://grg.org/WSRL/TableE.aspx>, that will be brought to this
+analysis as a way to validate the existence of such entries, and point
+if birth year entries should be further verified by the ones in charge
+of the data, that presumably have more resources to further verify the
+existence of wrong entries in other age ranges.
+
+##### Supercentenarians data-set structure:
+
+The hosted data-set has 3 different tables, one for supercentenarians
+proven to be alive on their last research, one for proven the be
+deceased on their last research, and one for "Limbo" supercentenarians
+that were once registered and verified, but that they lost contact with
+as their last research, having their status unknown, below the table's
+column names are shown to provide a glimpse oh their structure.
+
+```{r}
+alive_sc_2023 <- read.csv("~/Data/Supercentenarians/alive_supercentenarians_2023.csv")
+
+deceased_sc_2023 <- read.csv("~/Data/Supercentenarians/deceased_supercentenarians_2023.csv") 
+
+unknown_sc_2023 <- read.csv("~/Data/Supercentenarians/unknown_supercentenarians_2023.csv") 
+
+print("Alive on december 11 2023")
+colnames(alive_sc_2023)
+print("Deceased before december 11 2023")
+colnames(deceased_sc_2023)
+print("Unknown state on december 11 2023")
+colnames(unknown_sc_2023)
+```
+
+As it shows, the tables have different columns, for the alive table
+there is the rank column, for the deceased table there is Deathplace and
+Died columns, and for the Unknown table there isn't a Rank, Deathplace
+or Died column, we will further investigate this data sets structure,
+but for now they will be joined into one data-set to ease the process of
+cleaning and transforming them.
+
+##### Supercentenarians data cleaning and transforming:
+
+The tables will be joined keeping only columns that have variables that
+can be related to our trips data-set, such as age, sex (gender),
+residence or Deathplace, died (death year), and application date or
+added date to back the eventual lack of entry for application date (for
+unknown state supercentenarians, this is a date were they were certainly
+alive); a column called alive will be added to the data-sets to store
+information that was explicit on their titles, but wasn't on the tables,
+and that will serve to store a Boolean validation on which of the
+subjects were alive in 2016.
+
+```{r}
+alive_sc_2023 <- alive_sc_2023 %>%
+  select(Residence, Age, Sex, Applic.Date, Date.Added) %>%
+  mutate(Alive = TRUE)
+
+deceased_sc_2023 <- deceased_sc_2023 %>%
+  transform(Date.Added = DateAdded) %>%
+  select(Deathplace, Died, Age, Sex, Applic.Date, Date.Added)
+
+unknown_sc_2023 <- unknown_sc_2023 %>%
+  select(Residence, Age, Sex, Applic.Date, Date.Added)
+
+grg_supercentenarians <- bind_rows(alive_sc_2023, deceased_sc_2023, unknown_sc_2023)
+
+summary(grg_supercentenarians)
+```
+
+Lets clean and transform column names, so they are more consistent and
+follow the same pattern (snake case) also lets join residence and died
+(death place) columns in one column called last_location, so it will be
+easier to identify if their last known location is close or in Chicago,
+what would strengthen the possibility of them being subscribers of the
+Cyclistic bike sharing service.
+
+```{r}
+grg_supercentenarians <- clean_names(grg_supercentenarians)
+
+grg_supercentenarians <- grg_supercentenarians %>%
+  transform(deceased_date = died) %>%
+  transform(last_location = ifelse(is.na(deathplace), residence, deathplace)) %>%
+  transform(applic_date = ifelse(is.na(applic_date), date_added, applic_date)) %>%
+  select(-deathplace, -died, -residence, -date_added)
+
+head(grg_supercentenarians)
+```
+
+As the data frame above shows, the data is now structured as a data
+frame with 6 columns, coming from tables that had a maximum of 12
+columns, this selection allows to focus on the most important values for
+the verification processes that will follow up, and to save time and
+computing resources, next I'll transform date stored values from
+character to lubridate date time format, and also isolate the year from
+the age value.
+
+```{r}
+grg_supercentenarians <- grg_supercentenarians %>%
+  transform(applic_date = mdy(applic_date)) %>%
+  transform(deceased_date = mdy(deceased_date)) %>%
+  transform(age = sub(" .*", "", age))
+
+head(grg_supercentenarians)
+```
+
+#### Paired Analysis.
+
+Having the data cleaned and ready to be used to verify the validity of
+supercentenarians related entries on the trips data-set, is time to
+start the process, first I'll filter last known location to include only
+U.S.A. entries, unfortunately, as there isn't a standard format for
+inputs related to the United States, I will try to narrow down entries
+by filtering for locations that start with the letter "U".
+
+```{r}
+grg_supercentenarians <- grg_supercentenarians %>%
+  filter(startsWith(last_location, "U")) %>%
+  print()
+```
+
+The effort was succesful by lowering the total entries to 192, and
+including other than the desired entry, values related to the United
+Kingdom, as a next step I will filter out the "UK" entries for location
+as also filter out the deceased before 2016, in the case of lack of an
+entry for deceased date, I'll use application date instead.
+
+```{r}
+grg_supercentenarians <- grg_supercentenarians %>%
+  filter(!startsWith(last_location, "UK")) %>% 
+  filter(alive == TRUE | ifelse(is.na(deceased_date),year(applic_date) > year(ym("2015-01")), year(deceased_date) > year(ym("2015-01")))) %>%
+  print()
+```
+
+Dropped more 125 values, lets see if it is possible to also filter on
+gender, for it to be possible entries for gender on the Cyclistic trips
+data frame would need to entirely present only one gender value for
+every row, I'll do this by retrieving the values for gender in the
+Cyclistic supercentenarians data frame, formatted as simply "M" or "F"
+to be compatible with the values for sex in the GRG supercentenarians
+data frame, and them simply check the existence of matching values
+between the two.
+
+```{r}
+cyclistic_sc_gender <- cyclistic_supercentenarians %>%
+  distinct(gender) %>%
+  mutate(gender = substr(gender,1,1))
+
+grg_supercentenarians <- grg_supercentenarians %>%
+  filter(sex %in% cyclistic_sc_gender) %>%
+  print()
+```
+
+Strangely, there are indeed only entries for male supercentenarians on
+the Cyclistic trips data frame, once females are filtered out of the GRG
+supercentenarians data frame, there are only 2 subjects left, with only
+one of them having lived in Illinois - IL , the state where Chicago is
+located, the other lived in the other side of the country, lets end the
+transformations by calculating how old they would be in 2016.
+
+```{r}
+grg_supercentenarians %>%
+  transform(age = (as.integer(age) - (year(deceased_date) - 2016))) %>%
+  print()
+```
+
+The calculation resulted in the only possible male supercentenarian
+living close or in Chicago to not be a supercentenarian (110 or older)
+in 2016, backing up the hypothesis that the entries for
+supercentenarians aren't valid entries, and in fact are wrong inputs,
+what points to the possibility that more entries on birth year can be
+unreliable, and should be further investigated by data owners.
+
+On what is possible to be sure and corrected around birth year entries
+on the trips data-set, every entry depicting users of 110 years of age
+or older will be dropped.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  filter(birth_year > 1906 | is.na(birth_year))
+
+print(trips_2016)
+
+```
+
+#### Filtering Undesired Data.
+
+Going back to focus only on the Cyclistic trips data frame, and
+recalling that it's not a possibility to consult a bike data-set through
+bike ID, it's clear that the use of the bike id column is greatly
+limited, due to this it will be dropped to help keep in the data frame
+only information that will be valuable for the analysis step.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  select(-bike_id)
+
+head(trips_2016)
+```
+
+Checking for duplicates on trip ID.
+
+```{r}
+trip_dupes <- trips_2016 %>%
+  get_dupes(trip_id)
+
+print(trip_dupes)
+```
+
+Returned 50 duplicated entries, I'll drop them to keep only distinct
+entries.
+
+```{r}
+trips_2016 = trips_2016 %>%
+  distinct(trip_id, .keep_all = TRUE)
+
+```
+
+Next I will check for rides with a length smaller or equal to 30
+seconds, as a measure to square out possible situations where the bikes
+were taken from their station and shortly after given back, without
+properly resulting in a trip, and even possible errors in time stamps
+that would end up depicting trips that took place between different
+stations but have entries with trip lengths that are impossible to
+achieve.
+
+```{r}
+trips_2016 %>%
+  filter(trip_duration < 31) %>%
+  print()
+```
+
+None values smaller than 31 seconds were found, resulting in no need to
+further cleaning related to this subject, as far as it is possible to
+evaluate with the given data and R libraries, all entries seeem
+consistent when it comes to trip length.
+
+#### Transforming Desired Columns.
+
+Lets rearrange date time related columns, so the info is presented as
+start date (Date type), start time (time type), and duration (time type)
+starting on the start time column, it will be verified for entry
+formats.
+
+```{r}
+trips_2016 %>%
+  mutate(start_time_length = nchar(start_time)) %>%
+  group_by(start_time_length) %>%
+  slice(1) %>%
+  ungroup() %>%
+  print(trips_2016$start_time)
+
+```
+
+There is two different formats, both of them follow the mm/dd/YYYY
+format, but some have seconds in their time stamp, while others don't,
+lets add a string with ":00" as seconds, to the ones that don't follow
+the HH:MM:SS standard.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  mutate(start_time = ifelse(nchar(start_time) < 17, paste(start_time, ":00", sep=""), start_time))
+
+trips_2016 <- trips_2016 %>%
+  mutate(stop_time = ifelse(nchar(stop_time) < 17, paste(stop_time, ":00", sep=""), stop_time))
+
+trips_2016 %>%
+  group_by(nchar(start_time)) %>%
+  slice(1) %>%
+  ungroup() %>%
+  print(trips_2016$start_time)
+
+```
+
+Done, now its time to turn these strings in date time format, to after
+calculate the time difference between them.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  mutate(start_time = mdy_hms(start_time)) %>%
+  mutate(start_time = ymd_hms(start_time)) %>%
+  mutate(stop_time = mdy_hms(stop_time)) %>%
+  mutate(stop_time = ymd_hms(stop_time)) %>%
+
+print(trips_2016)
+```
+
+The execution was successful, but with some warnings, lets check for the
+values.
+
+```{r}
+trips_2016 %>%
+  group_by(nchar(start_time)) %>%
+  slice(1) %>%
+  ungroup() %>%
+  print(trips_2016$start_time)
+
+trips_2016 <- trips_2016 %>%
+  filter(!is.na(start_time))
+
+trips_2016 %>%
+  group_by(nchar(start_time)) %>%
+  slice(1) %>%
+  ungroup() %>%
+  print(trips_2016$start_time)
+```
+
+All done, null values where present, but now they are filtered out, I'll
+follow the process by calculating and storing the trip duration, as it
+will be useful on the analysis step to calculate metrics related to the
+trip duration.
+
+```{r}
+trips_2016 <- trips_2016 %>%
+  mutate(trip_duration = stop_time-start_time)
+
+head(trips_2016)
+```
+
+To finish the data cleaning of the trips data-set, time entries will be
+restructured on 3 columns, as previously discussed, also the birth year
+column will pass through transformation to store user age instead of
+birth year to facilitate understanding, it will be named appropriately.
+
+```{r}
+trips_2016$start_date <- date(trips_2016$start_time)
+trips_2016$start_time <- format(trips_2016$start_time, format="%H:%M:%S")
+trips_2016$age <- (2016-trips_2016$birth_year)
+
+trips_2016 <- trips_2016 %>%
+  select(trip_id, start_date, start_time, trip_duration,from_station_name, from_station_id, to_station_name, to_station_id, user_type, gender, age) 
+head(trips_2016)
+```
+
+#### Manual Verification.
+
+For peace of mind, lets check alphabetically arranged distinct values
+for stations, to make sure that there aren't some misspells on their
+names that could lead to entries for the same station not being
+grouped/summarized when needed.
+
+```{r}
+trips_2016 %>%
+  distinct(from_station_name, .keep_all = TRUE) %>%
+  arrange(from_station_name) %>%
+  print()
+```
+
+```{r}
+trips_2016 %>%
+  distinct(to_station_name, .keep_all = TRUE) %>%
+  arrange(to_station_name) %>%
+  print()
+```
+
+After verifying every distinct entry, no mistakenly inserted value for
+station names was found, a curious property for station name was
+noticed, "(...)" is present after station names, apparently it is used
+to make notations on stations, some only contain a "\*" without further
+information to be found in any of the data provided, while others have
+more detailed information as "(NEXT Apts)" which upon online search
+point out to be a building that serves as a point of reference.
+
+#### Stations Data-set.
+
+Additionally I'll bring the data-sets on stations for it to be cleaned
+and include what may be of best use for the analysis step, the data-sets
+on stations are also divided in 3 different data-sets, one for Q1 and
+Q2, and the other two for Q3 and Q4 respectively, they will be joined in
+one, storing only unique values, and the columns of interest will be the
+ones related to name, id, and coordinates.
+
+```{r}
+stations_Q1Q2 <- read_csv("~/Data/Stations/source/Divvy_Stations_2016_Q1Q2.csv")
+stations_Q3 <- read_csv("~/Data/Stations/source/Divvy_Stations_2016_Q3.csv")
+stations_Q4 <- read_csv("~/Data/Stations/source/Divvy_Stations_2016_Q4.csv")
+stations <- rbind(stations_Q1Q2, stations_Q3, stations_Q4)
+stations <- unique(stations)
+
+print(stations)
+```
+
+Two from the six columns can be discarded, as they refer to the station
+capacity and the day they went online, none of these will be of good use
+for what I'm proposing to analyse.
+
+```{r}
+stations_coord <- stations %>%
+  select(-online_date, -dpcapacity)
+print(stations_coord)
+```
+
+### Conclusion.
+
+That's it, the cleaning and basic transformation processes are done,
+data was verified, what was spotted as bad inputs based on metadata were
+discarded, column names were put to a standard format (snake case) based
+on the existing most common one, birth year was transformed to age as it
+is an easier format to present, centenarians entries for age were put to
+test using another data-set what led then to be proven invalid and then
+discarded, duplicates were cleaned, and possible inconsistencies that
+could be further cleaned upon consulting data owners were stated.
